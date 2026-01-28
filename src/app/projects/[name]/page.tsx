@@ -357,8 +357,9 @@ export default function ProjectDetailPage() {
       {/* Main Content */}
       <main className="container mx-auto px-4 md:px-6 py-4 md:py-6">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
-          {/* Left Panel - Vulnerabilities */}
-          <div className="lg:col-span-2">
+          {/* Left Panel - Vulnerabilities & Event Log */}
+          <div className="lg:col-span-2 space-y-4">
+            {/* 漏洞列表 */}
             <div className="cyber-card rounded-lg">
               <div className="p-3 md:p-4 border-b border-border/30">
                 <div className="flex items-center justify-between flex-wrap gap-2">
@@ -390,25 +391,24 @@ export default function ProjectDetailPage() {
                 <VulnTable vulns={vulnList} maxHeight="500px" />
               </div>
             </div>
+
+            {/* 事件日志 */}
+            <EventLog events={eventLog} maxHeight="360px" />
           </div>
 
           {/* Right Panel */}
-          <div className="space-y-4">
+          <div>
             <Tabs defaultValue="info" className="w-full">
-              <TabsList className="w-full grid grid-cols-3 bg-muted/50 h-10">
+              <TabsList className="w-full grid grid-cols-2 bg-muted/50 h-10">
                 <TabsTrigger value="info">环境信息</TabsTrigger>
-                <TabsTrigger value="logs">事件日志</TabsTrigger>
                 <TabsTrigger value="reports">报告</TabsTrigger>
               </TabsList>
-              <TabsContent value="info" className="space-y-4">
+              <TabsContent value="info" className="space-y-4 mt-2">
                 <ContainerList containers={containerList} />
-                <EnvInfoPanel envInfo={envInfo} />
+                <EnvInfoPanel envInfo={envInfo} maxHeight="640px" />
               </TabsContent>
-              <TabsContent value="logs">
-                <EventLog events={eventLog} maxHeight="500px" />
-              </TabsContent>
-              <TabsContent value="reports">
-                <ReportList projectName={projectName} reports={reportList} />
+              <TabsContent value="reports" className="mt-2">
+                <ReportList projectName={projectName} reports={reportList} maxHeight="780px" />
               </TabsContent>
             </Tabs>
           </div>

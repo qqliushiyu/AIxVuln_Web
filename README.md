@@ -1,4 +1,4 @@
-# AIxVuln
+# AIxVuln(下个版本更新内容)
 
 AIxVuln 是一个基于大模型（LLM）+ 工具调用（Function Calling）+ Docker 沙箱的**自动化漏洞挖掘与验证系统**。
 
@@ -17,15 +17,15 @@ AIxVuln 是一个基于大模型（LLM）+ 工具调用（Function Calling）+ D
 
 系统主界面：
 
-![image-20260127145044281](./README.assets/image-20260127145044281.png)
+![系统主界面](docs/images/img-1.png)
 
 运行中实时漏洞列表（未验证）：
 
-![image-20260127145121319](./README.assets/image-20260127145121319.png)
+![实时漏洞列表（未验证）](docs/images/img-2.png)
 
 实时产生的漏洞报告（已验证）：
 
-![f02b101d92082b2d8323e40023d15c19](./README.assets/f02b101d92082b2d8323e40023d15c19.png)
+![实时漏洞报告（已验证）](docs/images/img-3.png)
 
 ---
 
@@ -39,14 +39,24 @@ graph TB
         Swagger["Swagger 文档"]
     end
 
+    subgraph TQ["📬 TaskQueue"]
+        Queue["优先级队列"]
+        WorkerPool["Worker 池"]
+        Persistence["队列持久化"]
+    end
+
     subgraph PM["📋 ProjectManager"]
         Orchestrator["项目编排器"]
         AGScheduler["AgentGroup 调度"]
-        TaskQueue["任务队列"]
+        Scheduler["调度器<br/>传统/流水线/任务池"]
         Lifecycle["生命周期管理"]
     end
 
     subgraph Agents["🤖 Agent Layer"]
+        subgraph AG0["Decision Brain"]
+            DecisionAgent["DecisionBrainAgent<br/>决策大脑"]
+            Monitor["DecisionBrainMonitor<br/>异步监控"]
+        end
         subgraph AG1["AgentGroup 1"]
             Ops["OpsAgent<br/>环境搭建"]
         end
@@ -57,6 +67,7 @@ graph TB
         end
         subgraph AG3["AgentGroup 3"]
             Verifier["VerifierAgent<br/>漏洞验证"]
+            Dispatcher["VerifierDispatcher<br/>流水线调度"]
         end
         Report["ReportAgent<br/>报告生成"]
         SharedCtx["SharedContext<br/>共享记忆体"]
@@ -67,6 +78,8 @@ graph TB
         DockerMgr["DockerManager<br/>容器管理"]
         CtxMgr["ContextManager<br/>记忆管理"]
         VulnMgr["VulnManager<br/>漏洞管理"]
+        FragMgr["FragmentManager<br/>碎片管理"]
+        ChainMgr["ChainManager<br/>攻击链管理"]
     end
 
     subgraph Docker["🐳 Docker Sandbox"]
@@ -79,11 +92,19 @@ graph TB
         Redis["Redis"]
     end
 
-    Web --> PM
+    subgraph DB["💾 Database"]
+        SQLite["SQLite"]
+        LLMCache["LLM Cache"]
+    end
+
+    Web --> TQ
+    TQ --> PM
     PM --> Agents
     Agents --> Tools
     Tools --> Docker
+    Tools --> DB
 
+    DecisionAgent --> SharedCtx
     Ops --> SharedCtx
     Analyze1 --> SharedCtx
     Analyze2 --> SharedCtx
@@ -92,6 +113,8 @@ graph TB
 
     ToolMgr --> DockerMgr
     DockerMgr --> Docker
+    VulnMgr --> FragMgr
+    FragMgr --> ChainMgr
 ```
 
 ### 架构层级说明
@@ -99,10 +122,12 @@ graph TB
 | 层级 | 组件 | 职责 |
 |------|------|------|
 | **Web Layer** | Gin + WebSocket + Swagger | HTTP API、实时事件推送、交互式文档 |
-| **ProjectManager** | Orchestrator + AgentGroup | 项目生命周期管理、Agent 分组调度（组间串行、组内并发） |
-| **Agent Layer** | Ops/Analyze/Verifier/Report | 各类智能体执行具体任务，通过 SharedContext 共享信息 |
-| **Tool & Infrastructure** | ToolManager + DockerManager | 工具调用框架、容器管理、记忆体管理 |
+| **TaskQueue** | Queue + WorkerPool + Persistence | 优先级任务队列、并发控制、队列持久化 |
+| **ProjectManager** | Orchestrator + AgentGroup + Scheduler | 项目生命周期管理、Agent 分组调度、支持多种调度模式 |
+| **Agent Layer** | Decision/Ops/Analyze/Verifier/Report | 决策大脑协调、各类智能体执行任务，通过 SharedContext 共享信息 |
+| **Tool & Infrastructure** | ToolManager + Managers | 工具调用框架、容器/漏洞/碎片/攻击链管理 |
 | **Docker Sandbox** | 多语言容器 + 中间件 | 隔离执行环境，源码挂载于 `/sourceCodeDir` |
+| **Database** | SQLite + LLM Cache | 项目/漏洞/碎片/攻击链数据持久化、LLM 响应缓存 |
 
 ---
 
@@ -212,13 +237,15 @@ Agent 之间通过两种机制共享信息：
 
 | 模块 | 职责 | 关键文件 |
 |------|------|----------|
-| **Web/** | HTTP API + WebSocket 推送 + Swagger 文档 | `Route.go`, `Server.go`, `WebSocket.go` |
-| **ProjectManager/** | 项目级编排、AgentGroup 调度、任务队列管理 | `ProjectManager.go`, `Start.go` |
-| **agents/** | Agent 接口定义与实现（Ops/Analyze/Verifier/Report） | `base.go`, `AgentCore.go`, `*Agent.go` |
-| **llm/** | 记忆体管理（单 Agent / 多 Agent 共享） | `ContextManager.go`, `SharedContext.go` |
-| **toolCalling/** | LLM 工具调用框架与工具实现 | `ToolManager.go`, `*Tool.go` |
-| **dockerManager/** | Docker 容器操作封装 + ServiceManager | `DockerManager.go`, `service.go` |
-| **taskManager/** | Task/Sandbox/VulnManager 等运行时数据结构 | `Task.go`, `Sandbox.go`, `VulnManager.go` |
+| **Web/** | HTTP API + WebSocket 推送 + Swagger 文档 | `Route.go`, `Server.go`, `WebSocketImp.go` |
+| **ProjectManager/** | 项目级编排、AgentGroup 调度、多种调度模式 | `ProjectManager.go`, `Start.go` |
+| **agents/** | Agent 接口定义与实现（Decision/Ops/Analyze/Verifier/Report） | `base.go`, `AgentCore.go`, `*Agent.go` |
+| **llm/** | 记忆体管理、LLM 缓存、分层记忆 | `ContextManager.go`, `SharedContext.go`, `Cache.go`, `TieredMemory.go` |
+| **toolCalling/** | LLM 工具调用框架与 40+ 工具实现 | `ToolManager.go`, `*Tool.go` |
+| **dockerManager/** | Docker 容器操作封装 + 连接池 | `core.go`, `pool.go`, `service.go` |
+| **taskManager/** | 任务/沙箱/漏洞/碎片/攻击链/检查点管理 | `Task.go`, `VulnManager.go`, `FragmentManager.go`, `ChainManager.go` |
+| **taskQueue/** | 优先级任务队列、Worker 池、队列持久化 | `Queue.go`, `Worker.go`, `Persistence.go` |
+| **database/** | SQLite 数据持久化、JSON 迁移工具 | `database.go`, `schema.go`, `*_repo.go` |
 
 ### 技术选型
 
@@ -229,6 +256,7 @@ Agent 之间通过两种机制共享信息：
 | **WebSocket** | gorilla/websocket | 成熟稳定的 Go WebSocket 库 |
 | **LLM SDK** | sashabaranov/go-openai | OpenAI 风格 API，兼容多厂商模型 |
 | **容器** | Docker Engine API | 原生 Go 调用，无需 CLI 依赖 |
+| **数据库** | SQLite (modernc.org/sqlite) | 纯 Go 实现，无 CGO 依赖，单文件部署 |
 | **配置** | INI 格式 | 简单直观，支持多 section |
 
 ### 关键设计特性
@@ -312,6 +340,7 @@ agent.RegisterTool(toolCalling.NewDockerExecTool(task))
 | `DockerRunTool` | 创建并运行容器 |
 | `DockerExecTool` | 在容器内执行命令 |
 | `DockerLogsTool` | 获取容器日志 |
+| `DockerPsTool` | 列出运行中的容器 |
 | `DockerRemoveTool` | 删除容器 |
 | `DockerDirScanTool` | 扫描容器内目录 |
 | `DockerFileReadTool` | 读取容器内文件 |
@@ -331,6 +360,7 @@ agent.RegisterTool(toolCalling.NewDockerExecTool(task))
 | `IssueVulnTool` | 提交候选漏洞 |
 | `SubmitVulnTool` | 提交验证结果（verified/failed） |
 | `ReportVulnTool` | 生成漏洞报告 |
+| `IssueTool` | 通用问题提交工具 |
 
 ### 执行工具
 
@@ -340,6 +370,34 @@ agent.RegisterTool(toolCalling.NewDockerExecTool(task))
 | `RunPythonCodeTool` | 执行 Python 代码 |
 | `RunPHPCodeTool` | 执行 PHP 代码 |
 | `RunSQLTool` | 执行 SQL 语句 |
+
+### 规划与检查点工具
+
+| 工具 | 功能 |
+|------|------|
+| `PlanningTool` | 任务规划与分解 |
+| `TaskListTool` | 获取/更新任务列表 |
+| `CheckpointTools` | 创建/回滚检查点 |
+| `SummarizeProgressTool` | 汇总当前进度 |
+
+### 碎片与攻击链工具
+
+| 工具 | 功能 |
+|------|------|
+| `GetFragmentsTool` | 获取碎片利用点列表 |
+| `UpdateFragmentStatusTool` | 更新碎片状态 |
+| `CreateChainTool` | 创建攻击链 |
+| `AddChainStepTool` | 添加攻击链步骤 |
+| `GetChainsTool` | 获取攻击链列表 |
+| `AnalyzeChainTool` | 分析攻击链可行性 |
+
+### 决策与通信工具
+
+| 工具 | 功能 |
+|------|------|
+| `DecisionMessageTool` | 发送决策消息 |
+| `SharedMessageTool` | Agent 间共享消息 |
+| `SetAnalysisPriorityTool` | 设置分析优先级 |
 
 ---
 
@@ -391,12 +449,77 @@ LOG_FORMAT = console       # 输出格式 (console/json)
 ENABLE_CACHE = true        # 是否启用 LLM 缓存
 CACHE_TTL = 3600           # 缓存过期时间（秒）
 CACHE_MAX_SIZE = 1000      # 最大缓存条目数
+CACHE_PERSIST_FILE = ./data/llm_cache.json  # 缓存持久化文件
+```
 
+### 任务队列配置
+
+```ini
+[queue]
+MaxConcurrentTasks = 2     # 最大并发任务数
+MaxRetryCount = 3          # 任务失败最大重试次数
+RetryBackoffSeconds = 30   # 重试退避基础秒数（指数退避）
+EnablePersistence = true   # 是否启用队列持久化
+AutoSaveInterval = 5       # 队列自动保存间隔（秒）
+```
+
+### Decision Brain 配置
+
+```ini
+[decision]
+Enabled = true             # 是否启用决策驱动模式
+# MODEL = gpt-4-turbo      # Decision Brain 使用的模型（可选）
+# 决策介入点：start/post_ops/mid_analysis/pre_verify/final
+Intervention_Points = start,post_ops,mid_analysis,final
+MinDecisionInterval = 30   # 异步决策最小间隔（秒）
+EventAggregationWindow = 500  # 事件聚合窗口（毫秒）
+```
+
+### 调度器配置
+
+```ini
+[scheduler]
+EnablePipelineVerifier = true  # 启用流水线式 Verifier 调度
+MinVerifiers = 1               # 最小 Verifier 数量
+MaxVerifiers = 5               # 最大 Verifier 数量（动态扩容上限）
+ScaleUpThreshold = 3           # 触发扩容的 pending 阈值
+ScaleDownIdleSeconds = 60      # 空闲缩容时间（秒）
+
+# 任务池模式（与流水线模式互斥，任务池优先级更高）
+EnableTaskPool = false         # 启用任务池模式
+PoolWorkerCount = 6            # Worker 池总数量
+PoolWorkerIdleTimeout = 120    # Worker 空闲超时（秒）
+```
+
+### 优化特性配置
+
+```ini
 [optimization]
-EnablePlanning = false             # 启用规划功能
-EnableCheckpoint = false           # 启用检查点功能
-EnablePriorityEnforcement = false  # 启用优先级策略
+EnablePlanning = true              # 启用显式规划
+PlanningGranularity = coarse       # 规划粒度 (coarse/medium/fine)
+AdaptivePlanning = true            # 自适应规划
+EnableCheckpoint = true            # 启用检查点
+EnablePriorityEnforcement = false  # 启用优先级强制执行
 EnableTieredMemory = false         # 启用分层记忆
+EnableAsyncDecisionBrain = false   # 启用异步 Decision Brain
+```
+
+### 分层记忆配置
+
+```ini
+[memory]
+WorkingMemoryRounds = 10   # 工作记忆保留的对话轮次
+ImportantMemorySize = 20   # 重要记忆最大条目数
+AutoSummarize = true       # 自动生成摘要
+SummarizeThreshold = 8     # 触发摘要的阈值
+```
+
+### 检查点配置
+
+```ini
+[checkpoint]
+MaxCheckpoints = 5         # 最大检查点数量
+RetentionHours = 24        # 检查点保留时间（小时）
 ```
 
 ---
@@ -429,37 +552,77 @@ docker build -t java_env -f dockerfile/dockerfile.java_env/Dockerfile dockerfile
 ├── config.ini              # 配置文件
 ├── Web/                    # HTTP API + WebSocket 推送
 │   ├── Route.go            # 路由定义
-│   ├── Server.go           # 服务器启动
-│   └── WebSocket.go        # WebSocket 处理
+│   ├── Server.go           # 服务器启动与持久化
+│   ├── WebSocketImp.go     # WebSocket 实现
+│   ├── Base.go             # 基础结构定义
+│   ├── Misc.go             # 工具函数
+│   └── models.go           # 数据模型
 ├── ProjectManager/         # 项目级编排、并发与生命周期管理
 │   ├── ProjectManager.go   # 核心管理器
-│   └── Start.go            # 任务启动流程定义
+│   ├── Start.go            # 任务启动流程定义
+│   └── Base.go             # 基础结构
 ├── agents/                 # Agent 实现
 │   ├── base.go             # Agent 接口定义
 │   ├── AgentCore.go        # Agent 基类
 │   ├── OpsCommonAgent.go   # 环境搭建 Agent
 │   ├── AnalyzeCommonAgent.go   # 代码分析 Agent
 │   ├── VerifierCommonAgent.go  # 漏洞验证 Agent
-│   └── ReportCommonAgent.go    # 报告生成 Agent
-├── taskManager/            # Task/Sandbox/VulnManager 等
+│   ├── ReportCommonAgent.go    # 报告生成 Agent
+│   ├── DecisionBrainAgent.go   # 决策大脑 Agent
+│   ├── DecisionBrainMonitor.go # 异步决策监控器
+│   ├── TaskPoolScheduler.go    # 任务池调度器
+│   ├── PooledAgentWorker.go    # 池化 Agent Worker
+│   ├── VerifierDispatcher.go   # 流水线 Verifier 调度器
+│   └── PriorityEnforcer.go     # 优先级强制执行器
+├── taskManager/            # 任务与运行时管理
 │   ├── Task.go             # 任务结构
 │   ├── Sandbox.go          # 沙箱管理
-│   └── VulnManager.go      # 漏洞管理
+│   ├── VulnManager.go      # 漏洞管理
+│   ├── FragmentManager.go  # 碎片利用点管理
+│   ├── ChainManager.go     # 攻击链管理
+│   ├── CheckpointManager.go # 检查点管理
+│   ├── EventBus.go         # 事件总线
+│   ├── Progress.go         # 进度追踪
+│   └── Base.go             # 基础结构定义
+├── taskQueue/              # 任务队列管理
+│   ├── Queue.go            # 优先级任务队列
+│   ├── Worker.go           # 工作池与任务执行
+│   ├── Persistence.go      # 队列持久化
+│   └── AgentTaskPool.go    # Agent 任务池
+├── database/               # SQLite 数据库持久化
+│   ├── database.go         # 数据库初始化
+│   ├── schema.go           # 表结构定义
+│   ├── migrate.go          # JSON 迁移工具
+│   ├── project_repo.go     # 项目数据仓库
+│   ├── vuln_repo.go        # 漏洞数据仓库
+│   ├── fragment_repo.go    # 碎片数据仓库
+│   ├── chain_repo.go       # 攻击链数据仓库
+│   └── ...                 # 其他数据仓库
 ├── toolCalling/            # LLM Tool 调用与工具实现
 │   ├── ToolManager.go      # 工具管理器
-│   └── *Tool.go            # 各类工具实现
+│   └── *Tool.go            # 各类工具实现（40+ 工具）
 ├── dockerManager/          # Docker 操作封装 + ServiceManager
-│   ├── DockerManager.go    # Docker API 封装
+│   ├── core.go             # Docker API 封装
+│   ├── pool.go             # Docker 连接池
 │   └── service.go          # 语言环境服务
-├── llm/                    # 上下文与共享记忆体
+├── llm/                    # 上下文与记忆体管理
 │   ├── ContextManager.go   # 单 Agent 上下文
-│   └── SharedContext.go    # 多 Agent 共享上下文
+│   ├── SharedContext.go    # 多 Agent 共享上下文
+│   ├── Cache.go            # LLM 响应缓存
+│   ├── TieredMemory.go     # 分层记忆
+│   └── base.go             # Memory 接口定义
 ├── misc/                   # 配置/工具函数/任务模板
 ├── dockerfile/             # 镜像构建目录
 │   ├── dockerfile.aisandbox/
 │   └── dockerfile.java_env/
+├── docs/                   # 文档目录
+│   ├── CONFIGURATION.md    # 详细配置说明
+│   ├── API.md              # API 文档
+│   └── images/             # 文档图片
 └── data/                   # 运行时数据
-    └── projects/           # 项目数据
+    ├── projects/           # 项目数据
+    ├── aixvuln.db          # SQLite 数据库
+    └── llm_cache.json      # LLM 缓存文件
 ```
 
 ---
@@ -524,11 +687,16 @@ https://github.com/qqliushiyu/AIxVuln_Web
 
 | 方法 | 端点 | 说明 |
 |------|------|------|
+| `GET` | `/projects` | 获取所有项目列表 |
 | `POST` | `/projects/create?projectName=xxx` | 上传源代码压缩包创建项目 |
-| `GET` | `/projects/:name/start?startType=0\|1\|2` | 启动项目（0=完整流程, 1=仅分析, 2=决策驱动） |
+| `GET` | `/projects/:name` | 获取项目详情（状态、漏洞、容器、事件、进度） |
+| `GET` | `/projects/:name/start?startType=0\|1\|2&priority=N` | 启动项目（0=完整流程, 1=仅分析, 2=决策驱动） |
 | `GET` | `/projects/:name/cancel` | 取消运行中的任务 |
-| `GET` | `/projects/:name` | 获取项目详情（状态、漏洞、容器、事件） |
 | `GET` | `/projects/:name/del` | 删除项目 |
+| `GET` | `/projects/:name/containers` | 获取项目容器列表 |
+| `GET` | `/projects/:name/events?count=N` | 获取项目事件日志 |
+| `GET` | `/projects/:name/envinfo` | 获取项目环境信息 |
+| `GET` | `/projects/:name/agents` | 获取 Agent 运行状态 |
 
 ### 漏洞与报告
 
@@ -539,13 +707,121 @@ https://github.com/qqliushiyu/AIxVuln_Web
 | `GET` | `/projects/:name/reports/download/:id` | 下载单个报告 |
 | `GET` | `/projects/:name/reports/downloadAll` | 下载所有报告（ZIP） |
 
+### 碎片化利用点
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| `GET` | `/projects/:name/fragments` | 获取碎片列表 |
+| `GET` | `/projects/:name/fragments/:id` | 获取单个碎片详情 |
+| `POST` | `/projects/:name/fragments` | 创建新碎片 |
+| `PUT` | `/projects/:name/fragments/:id` | 更新碎片信息 |
+| `DELETE` | `/projects/:name/fragments/:id` | 删除碎片 |
+| `POST` | `/projects/:name/fragments/:id/relate` | 关联多个碎片 |
+| `POST` | `/projects/:name/fragments/:id/unrelate` | 取消碎片关联 |
+
+### 攻击链
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| `GET` | `/projects/:name/chains` | 获取攻击链列表 |
+| `GET` | `/projects/:name/chains/:id` | 获取单个攻击链详情 |
+| `POST` | `/projects/:name/chains` | 创建攻击链 |
+| `PUT` | `/projects/:name/chains/:id` | 更新攻击链 |
+| `DELETE` | `/projects/:name/chains/:id` | 删除攻击链 |
+| `POST` | `/projects/:name/chains/:id/steps` | 添加攻击链步骤 |
+| `DELETE` | `/projects/:name/chains/:id/steps/:order` | 删除攻击链步骤 |
+
+### 任务队列
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| `GET` | `/queue` | 获取队列状态（待执行/运行中任务） |
+| `GET` | `/queue/tasks/:taskId` | 获取任务详情 |
+| `POST` | `/queue/tasks/:taskId/priority?priority=N` | 更新任务优先级 |
+| `DELETE` | `/queue/tasks/:taskId` | 取消队列任务 |
+
+### 缓存管理
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| `GET` | `/cache/stats` | 获取 LLM 缓存统计信息 |
+| `POST` | `/cache/clear` | 清空 LLM 缓存 |
+
 ### 实时通信
 
 | 方法 | 端点 | 说明 |
 |------|------|------|
 | `GET` | `/ws` | WebSocket 连接，接收实时事件 |
 
-**认证**：Basic Auth（默认 `admin:ss0t@m4x`，可在配置文件中修改）
+**认证**：Basic Auth（默认 `admin:ss0t`，可在配置文件中修改）
+
+---
+
+## 高级功能
+
+### 任务队列
+
+系统支持优先级任务队列，实现多项目并发控制：
+
+- **优先级调度**：数值越大优先级越高，支持动态调整
+- **并发控制**：`MaxConcurrentTasks` 配置同时运行的任务数
+- **失败重试**：指数退避策略自动重试
+- **队列持久化**：服务重启后恢复未完成任务
+
+### 碎片化利用点
+
+碎片化利用点用于记录单独不能构成完整漏洞但有利用价值的发现：
+
+- **状态管理**：discovered → analyzing → confirmed → chained/dismissed
+- **关联关系**：多个碎片可建立关联，便于串联分析
+- **双来源**：Agent 自动发现 + 用户手动添加
+
+### 攻击链
+
+攻击链将多个碎片串联为完整的利用路径：
+
+- **步骤序列**：每步包含前置条件、执行动作、预期结果
+- **可行性评分**：0-100 评分，辅助判断攻击链成功率
+- **影响级别**：low/medium/high/critical
+- **状态跟踪**：draft → analyzing → confirmed → executed
+
+### Decision Brain 决策驱动模式
+
+Decision Brain 提供智能决策层，协调各 Agent 工作：
+
+- **介入点**：
+  - `start`: 任务开始前分析项目特征
+  - `post_ops`: 环境搭建后调整策略
+  - `mid_analysis`: 分析中期评估进度
+  - `final`: 最终汇总与建议
+- **异步监控**：可启用 `DecisionBrainMonitor` 实时监听事件并触发决策
+
+启动决策驱动模式：`/projects/:name/start?startType=2`
+
+### 调度模式
+
+系统支持三种 Verifier 调度模式：
+
+1. **传统模式**：Analyze 完成后才启动 Verifier（默认）
+2. **流水线模式**：Analyze 运行期间 Verifier 并行工作，动态扩缩容
+3. **任务池模式**：统一 Worker 池处理所有任务，资源利用率更高
+
+配置 `[scheduler]` 节选择调度模式。
+
+### LLM 缓存
+
+系统支持 LLM 响应缓存，减少重复请求：
+
+- **内存缓存**：基于请求内容哈希
+- **持久化**：服务重启后恢复缓存
+- **统计信息**：通过 `/cache/stats` 查看命中率
+
+### 检查点与回滚
+
+Agent 可在风险操作前创建检查点，失败后回滚恢复：
+
+- 保存当前记忆、漏洞列表、环境信息
+- 支持多个检查点，按时间自动清理
 
 ---
 

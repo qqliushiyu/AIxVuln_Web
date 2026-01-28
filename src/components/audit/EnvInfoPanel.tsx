@@ -6,6 +6,7 @@ import type { EnvStruct } from '@/lib/types';
 
 interface EnvInfoPanelProps {
   envInfo: EnvStruct | null;
+  maxHeight?: string;
 }
 
 function InfoItem({ label, value, isMono = false }: { label: string; value?: string; isMono?: boolean }) {
@@ -19,7 +20,7 @@ function InfoItem({ label, value, isMono = false }: { label: string; value?: str
   );
 }
 
-export function EnvInfoPanel({ envInfo }: EnvInfoPanelProps) {
+export function EnvInfoPanel({ envInfo, maxHeight = '350px' }: EnvInfoPanelProps) {
   if (!envInfo) {
     return (
       <Card className="cyber-card">
@@ -79,7 +80,7 @@ export function EnvInfoPanel({ envInfo }: EnvInfoPanelProps) {
           环境信息
         </CardTitle>
       </CardHeader>
-      <CardContent className="p-0 max-h-[350px] overflow-y-auto">
+      <CardContent className="p-0 overflow-y-auto" style={{ maxHeight }}>
         <div className="p-4 pt-0 space-y-4">
             {containerId && (
               <InfoItem label="容器 ID" value={containerId.slice(0, 12)} isMono />

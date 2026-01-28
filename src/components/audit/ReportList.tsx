@@ -11,9 +11,10 @@ import { toast } from 'sonner';
 interface ReportListProps {
   projectName: string;
   reports: ReportListStruct;
+  maxHeight?: string;
 }
 
-export function ReportList({ projectName, reports }: ReportListProps) {
+export function ReportList({ projectName, reports, maxHeight = '400px' }: ReportListProps) {
   const reportEntries = Object.entries(reports);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [selectedReport, setSelectedReport] = useState<{ id: string; name: string } | null>(null);
@@ -74,7 +75,7 @@ export function ReportList({ projectName, reports }: ReportListProps) {
           )}
         </CardTitle>
       </CardHeader>
-      <CardContent className="p-0 max-h-[400px] overflow-y-auto">
+      <CardContent className="p-0 overflow-y-auto" style={{ maxHeight }}>
           <div className="p-4 pt-0 space-y-2">
             {reportEntries.length === 0 ? (
               <div className="text-muted-foreground text-sm text-center py-4">
