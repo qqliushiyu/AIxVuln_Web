@@ -17,15 +17,15 @@ AIxVuln 是一个基于大模型（LLM）+ 工具调用（Function Calling）+ D
 
 系统主界面：
 
-![系统主界面](docs/images/img-1.png)
+![image-20260127145044281](./README.assets/image-20260127145044281.png)
 
 运行中实时漏洞列表（未验证）：
 
-![实时漏洞列表（未验证）](docs/images/img-2.png)
+![](./README.assets/image-20260127145121319.png)
 
 实时产生的漏洞报告（已验证）：
 
-![实时漏洞报告（已验证）](docs/images/img-3.png)
+![](./README.assets/f02b101d92082b2d8323e40023d15c19.png)
 
 ---
 
